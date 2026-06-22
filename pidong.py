@@ -65,11 +65,10 @@ def check_dict_api(word):
     except Exception:
         return []
 
-# 💡 [무적 패치] 서버 환경 상관없이 무조건 나눔고딕 한글 폰트 다운로드해서 쓰기
+# 💡 [무적 패치] 폰트 자동 다운로더
 @st.cache_resource
 def get_korean_font(size=20):
     font_path = "NanumGothic.ttf"
-    # 만약 서버에 폰트가 없다면 구글서버에서 실시간으로 다운로드 받아옵니다!
     if not os.path.exists(font_path):
         try:
             url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
@@ -115,7 +114,7 @@ def upload_png_to_github(img_bytes, student_id, student_name):
             if response.status in [200, 201]:
                 return True, f"✨ 제출 성공! 선생님의 [과제 확인 폴더]로 숙제 파일이 안전하게 전송되었습니다. 고생했어요!"
     except Exception as e:
-        return False, f"❌ 폴더 전송 실패: {str(e)} \n(※ 깃허브 비밀번호/토큰 열쇠 권한을 확인해 보세요)"
+        return False, f"❌ 폴더 전송 실패: {str(e)}"
 
 def analyze_sentence(text, target_type):
     if not TEACHER_API_KEY:
@@ -272,13 +271,29 @@ def create_report_png(student_id, student_name, sentences, plain_results, base_f
     img.save(img_byte_arr, format='PNG')
     return img_byte_arr.getvalue()
 
-# --- UI ---
+
+# ==========================================
+# 🚨 3. [금붕어 치료 완료] UI 및 수첩(Session) 설계
+# ==========================================
 st.set_page_config(page_title="국어과 과제 제출함", layout="centered")
+
+# 컴퓨터 수첩(Session State) 초기화
+if "passed_all" not in st.session_state:
+    st.session_state.passed_all = False
+if "report_png" not in st.session_state:
+    st.session_state.report_png = None
+
+# 글자를 1글자라도 수정하면 수첩을 찢어버리는(합격 취소) 함수
+def reset_pass_state():
+    st.session_state.passed_all = False
+    st.session_state.report_png = None
+
+def clear_q(key): 
+    st.session_state[key] = ""
+    reset_pass_state()
 
 for k in ['q1', 'q2', 'q3', 'q4']:
     if k not in st.session_state: st.session_state[k] = ""
-
-def clear_q(key): st.session_state[key] = ""
 
 st.title("🎓 국어과 피동·인용 표현 과제 제출함")
 st.markdown("학번과 이름을 정확히 적고 4가지 문장을 완성하세요. 4개 모두 초록색 불(통과)이 들어오면 **선생님 폴더로 바로 제출**할 수 있습니다!")
@@ -286,19 +301,21 @@ st.markdown("---")
 
 st.subheader("👤 학생 정보")
 col1, col2 = st.columns(2)
-with col1: s_id = st.text_input("학번 (예: 20101):", key="s_id", placeholder="예: 20101")
-with col2: s_name = st.text_input("이름 (예: 홍길동):", key="s_name", placeholder="예: 김민수")
+# 입력값이 바뀔 때마다 reset_pass_state 작동!
+with col1: s_id = st.text_input("학번 (예: 20101):", key="s_id", placeholder="예: 20101", on_change=reset_pass_state)
+with col2: s_name = st.text_input("이름 (예: 홍길동):", key="s_name", placeholder="예: 김민수", on_change=reset_pass_state)
 
 st.markdown("---")
 st.subheader("✍️ 과제 작성란")
 
-c1, b1 = st.columns([85, 15]); c1.text_input("1️⃣ 피동 표현 (-이-, -히-, -리-, -기-)", key="q1", placeholder="예: 토끼가 사자에게 발목을 잡혔다."); b1.write(""); b1.write(""); b1.button("🔄 지우기", key="btn1", on_click=clear_q, args=("q1",))
-c2, b2 = st.columns([85, 15]); c2.text_input("2️⃣ 피동 표현 (-아/어지다 또는 -되다)", key="q2", placeholder="예: 책상 위에 있던 우유가 쏟아졌다."); b2.write(""); b2.write(""); b2.button("🔄 지우기", key="btn2", on_click=clear_q, args=("q2",))
-c3, b3 = st.columns([85, 15]); c3.text_input("3️⃣ 직접 인용 표현", key="q3", placeholder="예: 민수가 나에게 \"매점 가자.\"라고 말했다."); b3.write(""); b3.write(""); b3.button("🔄 지우기", key="btn3", on_click=clear_q, args=("q3",))
-c4, b4 = st.columns([85, 15]); c4.text_input("4️⃣ 간접 인용 표현", key="q4", placeholder="예: 선생님께서 내일 체육복을 입고 오라고 하셨다."); b4.write(""); b4.write(""); b4.button("🔄 지우기", key="btn4", on_click=clear_q, args=("q4",))
+c1, b1 = st.columns([85, 15]); c1.text_input("1️⃣ 피동 표현 (-이-, -히-, -리-, -기-)", key="q1", placeholder="예: 토끼가 사자에게 발목을 잡혔다.", on_change=reset_pass_state); b1.write(""); b1.write(""); b1.button("🔄 지우기", key="btn1", on_click=clear_q, args=("q1",))
+c2, b2 = st.columns([85, 15]); c2.text_input("2️⃣ 피동 표현 (-아/어지다 또는 -되다)", key="q2", placeholder="예: 책상 위에 있던 우유가 쏟아졌다.", on_change=reset_pass_state); b2.write(""); b2.write(""); b2.button("🔄 지우기", key="btn2", on_click=clear_q, args=("q2",))
+c3, b3 = st.columns([85, 15]); c3.text_input("3️⃣ 직접 인용 표현", key="q3", placeholder="예: 민수가 나에게 \"매점 가자.\"라고 말했다.", on_change=reset_pass_state); b3.write(""); b3.write(""); b3.button("🔄 지우기", key="btn3", on_click=clear_q, args=("q3",))
+c4, b4 = st.columns([85, 15]); c4.text_input("4️⃣ 간접 인용 표현", key="q4", placeholder="예: 선생님께서 내일 체육복을 입고 오라고 하셨다.", on_change=reset_pass_state); b4.write(""); b4.write(""); b4.button("🔄 지우기", key="btn4", on_click=clear_q, args=("q4",))
 
 st.markdown("---")
 
+# 1단계 버튼: 채점 수행
 if st.button("🚀 내 과제 채점해보기"):
     if not s_id.strip() or not s_name.strip(): st.error("⚠️ 학번과 이름을 먼저 입력해 주세요!")
     elif not (st.session_state.q1 and st.session_state.q2 and st.session_state.q3 and st.session_state.q4): st.error("⚠️ 4개 문항 중 아직 안 쓴 칸이 있어요.")
@@ -334,14 +351,31 @@ if st.button("🚀 내 과제 채점해보기"):
             
             png_data = create_report_png(s_id, s_name, [st.session_state.q1, st.session_state.q2, st.session_state.q3, st.session_state.q4], [p1, p2, p3, p4], [b1, b2, b3, b4])
             
-            st.markdown("---")
-            st.subheader("🚀 선생님 폴더로 최종 제출")
-            st.write("아래 파란색 버튼을 누르면 내 과제 파일이 **선생님의 확인 폴더로 자동 전송**됩니다.")
+            # 수첩에 합격 도장 찍기! (새로고침 방어선 구축)
+            st.session_state.passed_all = True
+            st.session_state.report_png = png_data
+        else:
+            reset_pass_state()
+
+
+# ====================================================================
+# 💡 [핵심 치료 구간] 1번 버튼(채점)의 영향력 밖에서 수첩 검사하기!
+# 이제 새로고침이 되어도 '수첩에 도장 찍혀있으면' 이 버튼은 절대 안 사라집니다.
+# ====================================================================
+
+if st.session_state.passed_all and st.session_state.report_png:
+    st.markdown("---")
+    st.subheader("🚀 선생님 폴더로 최종 제출")
+    st.write("아래 파란색 버튼을 누르면 내 과제 파일이 **선생님의 확인 폴더로 자동 전송**됩니다.")
+    
+    # 2단계 버튼: 깃허브 전송 발사!
+    if st.button("📤 [선생님 폴더로 숙제 제출하기]", type="primary"):
+        with st.spinner("선생님의 과제 폴더로 숙제 파일을 전송하고 있습니다... 슝! 🛸"):
+            success, result_message = upload_png_to_github(st.session_state.report_png, s_id, s_name)
+        
+        if success: 
+            st.success(result_message)
+        else: 
+            st.error(result_message)
             
-            if st.button("📤 [선생님 폴더로 숙제 제출하기]", type="primary"):
-                with st.spinner("선생님의 과제 폴더로 숙제 파일을 전송하고 있습니다... 슝! 🛸"):
-                    success, result_message = upload_png_to_github(png_data, s_id, s_name)
-                if success: st.success(result_message)
-                else: st.error(result_message)
-                    
-            st.download_button("💾 혹시 모르니 내 컴퓨터에도 결과지 이미지 저장해두기", png_data, f"국어과제_{s_id}_{s_name}.png", "image/png")
+    st.download_button("💾 내 컴퓨터에도 결과지 이미지 저장해두기", st.session_state.report_png, f"국어과제_{s_id}_{s_name}.png", "image/png")
