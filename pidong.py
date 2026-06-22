@@ -3,12 +3,10 @@ from kiwipiepy import Kiwi
 from PIL import Image, ImageDraw, ImageFont
 import io
 import os
-import platform
 import urllib.request
 import urllib.parse
 import json
 import base64
-# ⭐ [시계 수리 1] timezone과 timedelta를 추가로 불러옵니다!
 from datetime import datetime, timezone, timedelta
 import xml.etree.ElementTree as ET
 
@@ -19,11 +17,15 @@ def load_kiwi():
 
 kiwi = load_kiwi()
 
+# --- 형광펜 색상 ---
 PASSIVE_COLOR = "<span style='background-color: #ffcccc; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
 CAUSATIVE_COLOR = "<span style='background-color: #fff2cc; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
 DIRECT_COLOR = "<span style='background-color: #cce5ff; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
 INDIRECT_COLOR = "<span style='background-color: #d4edda; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
 
+# =====================================================================
+# 🚨 2. 실전 배포용 비밀 금고(Secrets) 안전 연동 🚨
+# =====================================================================
 try:
     TEACHER_API_KEY = st.secrets["KOREAN_API_KEY"]
 except Exception:
@@ -36,6 +38,7 @@ except Exception:
     GITHUB_TOKEN = "" 
     GITHUB_REPO = ""  
 
+# --- 국립국어원 사전 API 통신 함수 ---
 def check_dict_api(word):
     if not TEACHER_API_KEY: return [] 
     url = f"https://stdict.korean.go.kr/api/search.do?key={TEACHER_API_KEY}&q={urllib.parse.quote(word)}"
@@ -44,19 +47,24 @@ def check_dict_api(word):
         res = urllib.request.urlopen(req)
         xml_data = res.read().decode('utf-8')
         root = ET.fromstring(xml_data)
+        
         pos_tags = []
         for item in root.findall('.//item'):
             pos_el = item.find('.//pos')
             def_el = item.find('.//sense/definition')
+            
             pos_text = pos_el.text.strip() if pos_el is not None and pos_el.text else ""
             def_text = def_el.text.strip() if def_el is not None and def_el.text else ""
+            
             if "피동사" in def_text: pos_tags.append("피동사")
             elif "사동사" in def_text: pos_tags.append("사동사")
             elif pos_text: pos_tags.append(pos_text)
+                
         return pos_tags 
     except Exception:
         return []
 
+# --- 한글 폰트 자동 다운로더 ---
 @st.cache_resource
 def get_korean_font(size=20):
     font_path = "NanumGothic.ttf"
@@ -66,7 +74,9 @@ def get_korean_font(size=20):
             urllib.request.urlretrieve(url, font_path)
         except Exception:
             pass
-    if os.path.exists(font_path): return ImageFont.truetype(font_path, size)
+            
+    if os.path.exists(font_path):
+        return ImageFont.truetype(font_path, size)
     return ImageFont.load_default()
 
 def is_yang_vowel(word_chunk):
@@ -78,35 +88,48 @@ def is_yang_vowel(word_chunk):
         return jung_seong_idx in [0, 2, 8, 9, 12]
     return False
 
+# --- 깃허브 업로드 함수 (경로 및 파일명 오류 완벽 수정 버전) ---
 def upload_png_to_github(img_bytes, student_id, student_name):
-    if not GITHUB_TOKEN or not GITHUB_REPO: return False, "⚠️ 온라인 수합 폴더가 연결되지 않았습니다."
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return False, "⚠️ 아직 선생님의 온라인 수합 폴더가 연결되지 않았습니다."
         
-    # ⭐ [시계 수리 2] 영국 시간(UTC)에 강제로 '9시간'을 더해서 대한민국 표준시(KST)로 고정합니다!
+    # 대한민국 표준시(KST) 동기화
     KST = timezone(timedelta(hours=9))
     timestamp = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
     
-    file_name = f"submissions/{student_id}_{student_name}_{timestamp}.png"
-    encoded_img = base64.b64encode(img_bytes).decode('utf-8')
-    safe_file_path = urllib.parse.quote(file_name)
+    # 💡 [핵심 조치] 파일명만 순수하게 추출하여 인터넷 주소용(ASCII)으로 안전 인코딩!
+    raw_filename = f"{student_id}_{student_name}_{timestamp}.png"
+    safe_filename = urllib.parse.quote(raw_filename)
     
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{safe_file_path}"
+    # submissions/ 파란 폴더 경로와 인코딩된 파일명을 매끄럽게 연결해 에러를 원천 차단합니다.
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/submissions/{safe_filename}"
+    
+    encoded_img = base64.b64encode(img_bytes).decode('utf-8')
+    
     headers = {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json",
         "Content-Type": "application/json"
     }
-    data = {"message": f"과제 제출: {student_id} {student_name}", "content": encoded_img}
+    data = {
+        "message": f"과제 제출: {student_id} {student_name}",
+        "content": encoded_img
+    }
     try:
         data_bytes = json.dumps(data).encode('utf-8')
         req = urllib.request.Request(url, headers=headers, data=data_bytes, method='PUT')
         with urllib.request.urlopen(req) as response:
             if response.status in [200, 201]:
-                return True, f"✨ 제출 성공! 선생님의 [과제 확인 폴더]로 숙제 파일이 안전하게 전송되었습니다."
+                return True, f"✨ 제출 성공! 선생님의 [과제 확인 폴더]로 숙제 파일이 안전하게 전송되었습니다. 고생했어요!"
+            else:
+                return False, f"❌ 전송 실패 (GitHub 서버 응답 코드: {response.status})"
     except Exception as e:
         return False, f"❌ 폴더 전송 실패: {str(e)}"
 
 def analyze_sentence(text, target_type):
-    if not TEACHER_API_KEY: return False, "", "", [], "🚨 표준국어대사전 API 키가 연결되지 않았습니다."
+    if not TEACHER_API_KEY:
+        return False, "", "", [], "🚨 [시스템 안내] 표준국어대사전 API 키가 연결되지 않았습니다."
+
     if not text.strip(): return False, "", "문장이 입력되지 않았습니다.", [], "문장을 입력해 주세요."
     tokens = kiwi.tokenize(text)
     has_quotes = '"' in text or '“' in text or '”' in text
@@ -119,6 +142,7 @@ def analyze_sentence(text, target_type):
     while i < len(tokens):
         token = tokens[i]
         form, tag = token.form, token.tag
+        
         if tag.startswith('V'): last_verb_stem = form
 
         if i < len(tokens) - 1 and tag == 'EC' and form in ['어', '아'] and tokens[i+1].tag == 'VX' and tokens[i+1].form == '지':
@@ -150,9 +174,11 @@ def analyze_sentence(text, target_type):
             if target_type == 1: found_target = True 
             root, suffix = form[:-1], form[-1]
             last_verb_stem = form 
+            
             display_html.append(f"{root}-"); display_plain.append(f"{root}-")
             bword = form + "다"
             base_forms.append({"word": bword, "valid": check_dict_api(bword)})
+            
             display_html.append(PASSIVE_COLOR.format(text=f"-{suffix}-(피동 접사)")); display_plain.append(f"[-{suffix}-(피동 접사)]")
             i += 1; continue
             
@@ -198,10 +224,12 @@ def analyze_sentence(text, target_type):
     if found_target and base_forms:
         for b in base_forms:
             plist = b['valid'] 
-            if not plist: api_rejected = True; error_msg = f"❌ '{b['word']}'는 표준국어대사전에 없는 단어예요!"; break
+            if not plist:
+                api_rejected = True; error_msg = f"❌ '{b['word']}'는 표준국어대사전에 없는 단어예요!"; break
+            
             if target_type == 1 and plist:
                 if '피동사' not in plist and '사동사' in plist:
-                    api_rejected = True; error_msg = f"❌ '{b['word']}'는 시키는 '사동사'예요. 당하는 '피동 표현'으로 다시 쓰세요!"; break
+                    api_rejected = True; error_msg = f"❌ '{b['word']}'는 누군가에게 시키는 '사동사'예요. 당하는 '피동 표현'으로 다시 쓰세요!"; break
 
     if api_rejected: found_target = False
     elif not found_target:
@@ -219,7 +247,11 @@ def analyze_sentence(text, target_type):
 
 def render_base_form_links(bases):
     if not bases: return ""
-    links = [f"<a href='https://stdict.korean.go.kr/search/searchResult.do?pageSize=10&searchKeyword={urllib.parse.quote(b['word'])}' target='_blank' style='text-decoration:none;'>🔍 <b>{b['word']}</b></a> {'<span style=color:green;font-weight:bold;>(✅ 확인완료)</span>' if b['valid'] else '<span style=color:red;font-weight:bold;>(❌ 오답)</span>'}" for b in bases]
+    links = []
+    for b in bases:
+        w, v = b['word'], b['valid']
+        status = "<span style='color:green; font-weight:bold;'>(✅ 사전 확인 완료)</span>" if v else "<span style='color:red; font-weight:bold;'>(❌ 오답)</span>"
+        links.append(f"<a href='https://stdict.korean.go.kr/search/searchResult.do?pageSize=10&searchKeyword={urllib.parse.quote(w)}' target='_blank' style='text-decoration:none;'>🔍 <b>{w}</b></a> {status}")
     return "👉 [단어 사전에서 보기]: " + " | ".join(links)
 
 def create_report_png(student_id, student_name, sentences, plain_results, base_forms_list):
@@ -238,6 +270,7 @@ def create_report_png(student_id, student_name, sentences, plain_results, base_f
         draw.text((40, y_pos), labels[idx], fill=(0, 102, 204), font=fsub); y_pos += 26
         draw.text((60, y_pos), f"작성 문장: {sentences[idx]}", fill=(0, 0, 0), font=fbody); y_pos += 22
         draw.text((60, y_pos), f"형태소 분석: {plain_results[idx]}", fill=(220, 50, 50), font=fbody)
+        
         bases = base_forms_list[idx]
         if bases:
             btexts = [f"{b['word']} {'[확인완료]' if b['valid'] else '[미등재/오답]'}" for b in bases]
@@ -248,11 +281,19 @@ def create_report_png(student_id, student_name, sentences, plain_results, base_f
     img.save(img_byte_arr, format='PNG')
     return img_byte_arr.getvalue()
 
+
+# ==========================================
+# 💡 UI 및 기억 수첩(Session State) 제어 구간
+# ==========================================
 st.set_page_config(page_title="국어과 과제 제출함", layout="centered")
 
-if "passed_all" not in st.session_state: st.session_state.passed_all = False
-if "report_png" not in st.session_state: st.session_state.report_png = None
+# 컴퓨터 수첩(Session State) 초기화
+if "passed_all" not in st.session_state:
+    st.session_state.passed_all = False
+if "report_png" not in st.session_state:
+    st.session_state.report_png = None
 
+# 글자를 1글자라도 수정하면 수첩 합격 여부 리셋
 def reset_pass_state():
     st.session_state.passed_all = False
     st.session_state.report_png = None
@@ -279,10 +320,11 @@ st.subheader("✍️ 과제 작성란")
 c1, b1 = st.columns([85, 15]); c1.text_input("1️⃣ 피동 표현 (-이-, -히-, -리-, -기-)", key="q1", placeholder="예: 토끼가 사자에게 발목을 잡혔다.", on_change=reset_pass_state); b1.write(""); b1.write(""); b1.button("🔄 지우기", key="btn1", on_click=clear_q, args=("q1",))
 c2, b2 = st.columns([85, 15]); c2.text_input("2️⃣ 피동 표현 (-아/어지다 또는 -되다)", key="q2", placeholder="예: 책상 위에 있던 우유가 쏟아졌다.", on_change=reset_pass_state); b2.write(""); b2.write(""); b2.button("🔄 지우기", key="btn2", on_click=clear_q, args=("q2",))
 c3, b3 = st.columns([85, 15]); c3.text_input("3️⃣ 직접 인용 표현", key="q3", placeholder="예: 민수가 나에게 \"매점 가자.\"라고 말했다.", on_change=reset_pass_state); b3.write(""); b3.write(""); b3.button("🔄 지우기", key="btn3", on_click=clear_q, args=("q3",))
-c4, b4 = 기 = st.columns([85, 15]); c4.text_input("4️⃣ 간접 인용 표현", key="q4", placeholder="예: 선생님께서 내일 체육복을 입고 오라고 하셨다.", on_change=reset_pass_state); b4.write(""); b4.write(""); b4.button("🔄 지우기", key="btn4", on_click=clear_q, args=("q4",))
+c4, b4 = st.columns([85, 15]); c4.text_input("4️⃣ 간접 인용 표현", key="q4", placeholder="예: 선생님께서 내일 체육복을 입고 오라고 하셨다.", on_change=reset_pass_state); b4.write(""); b4.write(""); b4.button("🔄 지우기", key="btn4", on_click=clear_q, args=("q4",))
 
 st.markdown("---")
 
+# 1단계 버튼: 채점 수행
 if st.button("🚀 내 과제 채점해보기"):
     if not s_id.strip() or not s_name.strip(): st.error("⚠️ 학번과 이름을 먼저 입력해 주세요!")
     elif not (st.session_state.q1 and st.session_state.q2 and st.session_state.q3 and st.session_state.q4): st.error("⚠️ 4개 문항 중 아직 안 쓴 칸이 있어요.")
@@ -293,28 +335,49 @@ if st.button("🚀 내 과제 채점해보기"):
         ok4, h4, p4, b4, e4 = analyze_sentence(st.session_state.q4, 4)
         
         st.subheader("🔍 채점 결과")
-        st.markdown(f"**[1번]** {h1}", unsafe_allow_html=True); (st.success("✔️ 통과!") if ok1 else st.error(e1))
+        
+        st.markdown(f"**[1번]** {h1}", unsafe_allow_html=True)
+        if ok1: st.success("✔️ 통과!")
+        else: st.error(e1)
         if b1: st.markdown(render_base_form_links(b1), unsafe_allow_html=True)
         
-        st.markdown(f"<br>**[2번]** {h2}", unsafe_allow_html=True); (st.success("✔️ 통과!") if ok2 else st.error(e2))
+        st.markdown(f"<br>**[2번]** {h2}", unsafe_allow_html=True)
+        if ok2: st.success("✔️ 통과!")
+        else: st.error(e2)
         if b2: st.markdown(render_base_form_links(b2), unsafe_allow_html=True)
         
-        st.markdown(f"<br>**[3번]** {h3}", unsafe_allow_html=True); (st.success("✔️ 통과!") if ok3 else st.error(e3))
-        st.markdown(f"<br>**[4번]** {h4}", unsafe_allow_html=True); (st.success("✔️ 통과!") if ok4 else st.error(e4))
+        st.markdown(f"<br>**[3번]** {h3}", unsafe_allow_html=True)
+        if ok3: st.success("✔️ 통과!")
+        else: st.error(e3)
+        
+        st.markdown(f"<br>**[4번]** {h4}", unsafe_allow_html=True)
+        if ok4: st.success("✔️ 통과!")
+        else: st.error(e4)
         
         if ok1 and ok2 and ok3 and ok4:
             st.balloons()
             st.success("🎉 완벽합니다! 4개 문항을 모두 맞혔습니다.")
+            
+            png_data = create_report_png(s_id, s_name, [st.session_state.q1, st.session_state.q2, st.session_state.q3, st.session_state.q4], [p1, p2, p3, p4], [b1, b2, b3, b4])
+            
             st.session_state.passed_all = True
-            st.session_state.report_png = create_report_png(s_id, s_name, [st.session_state.q1, st.session_state.q2, st.session_state.q3, st.session_state.q4], [p1, p2, p3, p4], [b1, b2, b3, b4])
-        else: reset_pass_state()
+            st.session_state.report_png = png_data
+        else:
+            reset_pass_state()
 
+# 2단계 버튼: 깃허브 제출 및 다운로드 (금붕어 리런 새로고침 방어 완료)
 if st.session_state.passed_all and st.session_state.report_png:
     st.markdown("---")
     st.subheader("🚀 선생님 폴더로 최종 제출")
     st.write("아래 파란색 버튼을 누르면 내 과제 파일이 **선생님의 확인 폴더로 자동 전송**됩니다.")
+    
     if st.button("📤 [선생님 폴더로 숙제 제출하기]", type="primary"):
         with st.spinner("선생님의 과제 폴더로 숙제 파일을 전송하고 있습니다... 슝! 🛸"):
-            success, msg = upload_png_to_github(st.session_state.report_png, s_id, s_name)
-        (st.success(msg) if success else st.error(msg))
+            success, result_message = upload_png_to_github(st.session_state.report_png, s_id, s_name)
+        
+        if success: 
+            st.success(result_message)
+        else: 
+            st.error(result_message)
+            
     st.download_button("💾 내 컴퓨터에도 결과지 이미지 저장해두기", st.session_state.report_png, f"국어과제_{s_id}_{s_name}.png", "image/png")
