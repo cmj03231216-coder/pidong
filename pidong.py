@@ -39,7 +39,6 @@ except Exception:
     GITHUB_TOKEN = "" 
     GITHUB_REPO = ""  
 
-# --- 사전 API 통신 함수 ---
 def check_dict_api(word):
     if not TEACHER_API_KEY: return [] 
     url = f"https://stdict.korean.go.kr/api/search.do?key={TEACHER_API_KEY}&q={urllib.parse.quote(word)}"
@@ -65,7 +64,6 @@ def check_dict_api(word):
     except Exception:
         return []
 
-# 💡 [무적 패치] 폰트 자동 다운로더
 @st.cache_resource
 def get_korean_font(size=20):
     font_path = "NanumGothic.ttf"
@@ -89,15 +87,19 @@ def is_yang_vowel(word_chunk):
         return jung_seong_idx in [0, 2, 8, 9, 12]
     return False
 
+# 💡 [치료 완료] 인터넷 주소창 ASCII 거부 반응 완벽 수리
 def upload_png_to_github(img_bytes, student_id, student_name):
     if not GITHUB_TOKEN or not GITHUB_REPO:
-        return False, "⚠️ 아직 선생님의 온라인 수합 폴더가 연결되지 않았습니다. (일단 아래 [내 컴퓨터에 저장] 버튼을 눌러 파일로 제출해 주세요!)"
+        return False, "⚠️ 아직 선생님의 온라인 수합 폴더가 연결되지 않았습니다."
         
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_name = f"submissions/{student_id}_{student_name}_{timestamp}.png"
     encoded_img = base64.b64encode(img_bytes).decode('utf-8')
     
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_name}"
+    # ⭐ [핵심 치료 코드] 한글 이름이 들어간 경로를 인터넷 주소용 %ED 암호로 안전하게 변환!
+    safe_file_path = urllib.parse.quote(file_name)
+    
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{safe_file_path}"
     headers = {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json",
@@ -118,7 +120,7 @@ def upload_png_to_github(img_bytes, student_id, student_name):
 
 def analyze_sentence(text, target_type):
     if not TEACHER_API_KEY:
-        return False, "", "", [], "🚨 [시스템 안내] 선생님께서 아직 표준국어대사전 API 키를 서버 금고에 연결하지 않으셨습니다."
+        return False, "", "", [], "🚨 [시스템 안내] 표준국어대사전 API 키가 연결되지 않았습니다."
 
     if not text.strip(): return False, "", "문장이 입력되지 않았습니다.", [], "문장을 입력해 주세요."
     tokens = kiwi.tokenize(text)
@@ -273,17 +275,13 @@ def create_report_png(student_id, student_name, sentences, plain_results, base_f
 
 
 # ==========================================
-# 🚨 3. [금붕어 치료 완료] UI 및 수첩(Session) 설계
+# UI 및 수첩(Session State) 설계
 # ==========================================
 st.set_page_config(page_title="국어과 과제 제출함", layout="centered")
 
-# 컴퓨터 수첩(Session State) 초기화
-if "passed_all" not in st.session_state:
-    st.session_state.passed_all = False
-if "report_png" not in st.session_state:
-    st.session_state.report_png = None
+if "passed_all" not in st.session_state: st.session_state.passed_all = False
+if "report_png" not in st.session_state: st.session_state.report_png = None
 
-# 글자를 1글자라도 수정하면 수첩을 찢어버리는(합격 취소) 함수
 def reset_pass_state():
     st.session_state.passed_all = False
     st.session_state.report_png = None
@@ -301,7 +299,6 @@ st.markdown("---")
 
 st.subheader("👤 학생 정보")
 col1, col2 = st.columns(2)
-# 입력값이 바뀔 때마다 reset_pass_state 작동!
 with col1: s_id = st.text_input("학번 (예: 20101):", key="s_id", placeholder="예: 20101", on_change=reset_pass_state)
 with col2: s_name = st.text_input("이름 (예: 홍길동):", key="s_name", placeholder="예: 김민수", on_change=reset_pass_state)
 
@@ -315,7 +312,6 @@ c4, b4 = st.columns([85, 15]); c4.text_input("4️⃣ 간접 인용 표현", key
 
 st.markdown("---")
 
-# 1단계 버튼: 채점 수행
 if st.button("🚀 내 과제 채점해보기"):
     if not s_id.strip() or not s_name.strip(): st.error("⚠️ 학번과 이름을 먼저 입력해 주세요!")
     elif not (st.session_state.q1 and st.session_state.q2 and st.session_state.q3 and st.session_state.q4): st.error("⚠️ 4개 문항 중 아직 안 쓴 칸이 있어요.")
@@ -348,34 +344,21 @@ if st.button("🚀 내 과제 채점해보기"):
         if ok1 and ok2 and ok3 and ok4:
             st.balloons()
             st.success("🎉 완벽합니다! 4개 문항을 모두 맞혔습니다.")
-            
             png_data = create_report_png(s_id, s_name, [st.session_state.q1, st.session_state.q2, st.session_state.q3, st.session_state.q4], [p1, p2, p3, p4], [b1, b2, b3, b4])
-            
-            # 수첩에 합격 도장 찍기! (새로고침 방어선 구축)
             st.session_state.passed_all = True
             st.session_state.report_png = png_data
         else:
             reset_pass_state()
-
-
-# ====================================================================
-# 💡 [핵심 치료 구간] 1번 버튼(채점)의 영향력 밖에서 수첩 검사하기!
-# 이제 새로고침이 되어도 '수첩에 도장 찍혀있으면' 이 버튼은 절대 안 사라집니다.
-# ====================================================================
 
 if st.session_state.passed_all and st.session_state.report_png:
     st.markdown("---")
     st.subheader("🚀 선생님 폴더로 최종 제출")
     st.write("아래 파란색 버튼을 누르면 내 과제 파일이 **선생님의 확인 폴더로 자동 전송**됩니다.")
     
-    # 2단계 버튼: 깃허브 전송 발사!
     if st.button("📤 [선생님 폴더로 숙제 제출하기]", type="primary"):
         with st.spinner("선생님의 과제 폴더로 숙제 파일을 전송하고 있습니다... 슝! 🛸"):
             success, result_message = upload_png_to_github(st.session_state.report_png, s_id, s_name)
-        
-        if success: 
-            st.success(result_message)
-        else: 
-            st.error(result_message)
+        if success: st.success(result_message)
+        else: st.error(result_message)
             
     st.download_button("💾 내 컴퓨터에도 결과지 이미지 저장해두기", st.session_state.report_png, f"국어과제_{s_id}_{s_name}.png", "image/png")
